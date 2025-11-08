@@ -10,16 +10,23 @@ import {
   serverTimestamp,
   query,
   orderBy,
+  where,
+  getDocs,
 } from 'firebase/firestore'
 import MemberForm from './MemberForm.jsx'
 import MemberList from './MemberList.jsx'
+import TrainingTypesManager from './TrainingTypesManager.jsx'
+import EditMemberForm from './EditMemberForm.jsx'
 
 const App = () => {
   const [members, setMembers] = useState([])
+  const [trainingTypes, setTrainingTypes] = useState([])
   const [filter, setFilter] = useState('all') // 'all' | 'unpaid'
   const [search, setSearch] = useState('')
-  const [trainingFilter, setTrainingFilter] = useState('all') // 'all' | Karate | Gym | Taekwondo | Gymnastics
+  const [trainingFilter, setTrainingFilter] = useState('all')
   const [error, setError] = useState(null)
+  const [editingMember, setEditingMember] = useState(null)
+  const [memberToDelete, setMemberToDelete] = useState(null)
 
   // Realtime subscription - try with orderBy first, fallback to simple query
   useEffect(() => {
@@ -90,6 +97,89 @@ const App = () => {
       if (unsub) unsub()
     }
   }, [])
+
+  // Subscribe to training types
+  useEffect(() => {
+    const typesRef = collection(db, 'trainingTypes')
+    const unsub = onSnapshot(
+      typesRef,
+      (snap) => {
+        const types = snap.docs.map((d) => ({ id: d.id, name: d.data().name }))
+        setTrainingTypes(types)
+      },
+      (err) => {
+        console.error('Error loading training types:', err)
+      }
+    )
+    return () => unsub()
+  }, [])
+
+  // Initialize default training types on first load
+  useEffect(() => {
+    const initDefaults = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'trainingTypes'))
+        if (snap.empty) {
+          const defaults = ['Karate', 'Gym', 'Taekwondo', 'Gymnastics']
+          for (const name of defaults) {
+            await addDoc(collection(db, 'trainingTypes'), { 
+              name, 
+              createdAt: serverTimestamp() 
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Error initializing training types:', err)
+      }
+    }
+    initDefaults()
+  }, [])
+
+  // Add new training type
+  const addTrainingType = async (name) => {
+    if (!name.trim()) return
+    try {
+      // Check if already exists
+      const q = query(collection(db, 'trainingTypes'), where('name', '==', name.trim()))
+      const snap = await getDocs(q)
+      if (!snap.empty) {
+        setError('Training type already exists')
+        setTimeout(() => setError(null), 3000)
+        return
+      }
+      await addDoc(collection(db, 'trainingTypes'), { 
+        name: name.trim(), 
+        createdAt: serverTimestamp() 
+      })
+      setError(null)
+    } catch (err) {
+      console.error('Error adding training type:', err)
+      setError(`Failed to add training type: ${err.message}`)
+      setTimeout(() => setError(null), 5000)
+    }
+  }
+
+  // Delete training type
+  const deleteTrainingType = async (id) => {
+    try {
+      // Check if any members use this training type
+      const typeName = trainingTypes.find(t => t.id === id)?.name
+      if (typeName) {
+        const membersUsingType = members.filter(m => m.trainingType === typeName)
+        if (membersUsingType.length > 0) {
+          setError(`Cannot delete: ${membersUsingType.length} member(s) are using this training type`)
+          setTimeout(() => setError(null), 5000)
+          return
+        }
+      }
+      await deleteDoc(doc(db, 'trainingTypes', id))
+      setError(null)
+    } catch (err) {
+      console.error('Error deleting training type:', err)
+      setError(`Failed to delete training type: ${err.message}`)
+      setTimeout(() => setError(null), 5000)
+    }
+  }
 
   const daysInMonth = (year, monthIndex) => {
     return new Date(year, monthIndex + 1, 0).getDate()
@@ -168,6 +258,7 @@ const App = () => {
         date: newMember.date,
         trainingType: newMember.trainingType,
         paymentStatus: !!newMember.paymentStatus,
+        paymentAmount: newMember.paymentAmount || 0,
         paidUntil,
         createdAt: serverTimestamp(),
       })
@@ -199,14 +290,40 @@ const App = () => {
     }
   }
 
-  const deleteMember = async (id) => {
+  const editMember = async (id, updatedData) => {
     try {
-      await deleteDoc(doc(db, 'members', id))
+      await updateDoc(doc(db, 'members', id), {
+        name: updatedData.name,
+        lastName: updatedData.lastName,
+        date: updatedData.date,
+        trainingType: updatedData.trainingType,
+        paymentAmount: updatedData.paymentAmount || 0,
+      })
+      setEditingMember(null)
       setError(null)
     } catch (err) {
-      console.error('Error deleting member:', err)
-      setError(`Failed to delete member: ${err.message}`)
+      console.error('Error editing member:', err)
+      setError(`Failed to update member: ${err.message}`)
       setTimeout(() => setError(null), 5000)
+    }
+  }
+
+  const handleDeleteClick = (id) => {
+    const member = members.find((m) => m.id === id)
+    setMemberToDelete({ id, name: member ? `${member.name} ${member.lastName}` : 'this member' })
+  }
+
+  const confirmDelete = async () => {
+    if (memberToDelete) {
+      try {
+        await deleteDoc(doc(db, 'members', memberToDelete.id))
+        setMemberToDelete(null)
+        setError(null)
+      } catch (err) {
+        console.error('Error deleting member:', err)
+        setError(`Failed to delete member: ${err.message}`)
+        setTimeout(() => setError(null), 5000)
+      }
     }
   }
 
@@ -242,7 +359,12 @@ const App = () => {
           ⚠️ {error}
         </div>
       )}
-      <MemberForm addMember={addMember} />
+      <TrainingTypesManager
+        trainingTypes={trainingTypes}
+        onAdd={addTrainingType}
+        onDelete={deleteTrainingType}
+      />
+      <MemberForm addMember={addMember} trainingTypes={trainingTypes} />
       <div style={{ marginTop: 12, marginBottom: 8, display: 'grid', gap: 8, gridTemplateColumns: '1fr', alignItems: 'center' }}>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span>Status:</span>
@@ -255,10 +377,11 @@ const App = () => {
           <span>Training:</span>
           <select value={trainingFilter} onChange={(e) => setTrainingFilter(e.target.value)}>
             <option value="all">All</option>
-            <option value="Karate">Karate</option>
-            <option value="Gym">Gym</option>
-            <option value="Taekwondo">Taekwondo</option>
-            <option value="Gymnastics">Gymnastics</option>
+            {trainingTypes.map((type) => (
+              <option key={type.id} value={type.name}>
+                {type.name}
+              </option>
+            ))}
           </select>
         </label>
         <input
@@ -271,8 +394,71 @@ const App = () => {
       <MemberList
         members={displayedMembers}
         togglePaymentStatus={togglePaymentStatus}
-        deleteMember={deleteMember}
+        onDeleteClick={handleDeleteClick}
+        onEditClick={setEditingMember}
       />
+      {editingMember && (
+        <EditMemberForm
+          member={editingMember}
+          trainingTypes={trainingTypes}
+          onSave={(data) => editMember(editingMember.id, data)}
+          onCancel={() => setEditingMember(null)}
+        />
+      )}
+      {memberToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setMemberToDelete(null)}
+        >
+          <div
+            style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '8px',
+              maxWidth: '400px',
+              width: '90%',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0 }}>Confirm Delete</h3>
+            <p>Are you sure you want to delete <strong>{memberToDelete.name}</strong>? This action cannot be undone.</p>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
+              <button
+                onClick={confirmDelete}
+                className="danger"
+                style={{ flex: 1 }}
+              >
+                Delete
+              </button>
+              <button
+                onClick={() => setMemberToDelete(null)}
+                style={{
+                  flex: 1,
+                  background: '#757575',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,21 +1,30 @@
 import React, { useState } from 'react'
 
-const MemberForm = ({ addMember }) => {
+const MemberForm = ({ addMember, trainingTypes }) => {
   const [name, setName] = useState('')
   const [lastName, setLastName] = useState('')
   const [date, setDate] = useState('')
   const [trainingType, setTrainingType] = useState('')
   const [paymentStatus, setPaymentStatus] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState('')
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    const newMember = { name, lastName, date, trainingType, paymentStatus }
+    const newMember = { 
+      name, 
+      lastName, 
+      date, 
+      trainingType, 
+      paymentStatus,
+      paymentAmount: paymentAmount ? parseFloat(paymentAmount) : 0
+    }
     addMember(newMember)
     setName('')
     setLastName('')
     setDate('')
     setTrainingType('')
     setPaymentStatus(false)
+    setPaymentAmount('')
   }
 
   return (
@@ -46,11 +55,20 @@ const MemberForm = ({ addMember }) => {
         required
       >
         <option value="">Select Training Type</option>
-        <option value="Karate">Karate</option>
-        <option value="Gym">Gym</option>
-        <option value="Taekwondo">Taekwondo</option>
-        <option value="Gymnastics">Gymnastics</option>
+        {trainingTypes.map((type) => (
+          <option key={type.id} value={type.name}>
+            {type.name}
+          </option>
+        ))}
       </select>
+      <input
+        type="number"
+        placeholder="Monthly Payment Amount"
+        value={paymentAmount}
+        onChange={(e) => setPaymentAmount(e.target.value)}
+        min="0"
+        step="0.01"
+      />
       <label className="checkbox">
         <input
           type="checkbox"

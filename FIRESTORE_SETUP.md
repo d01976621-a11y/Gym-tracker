@@ -41,6 +41,10 @@ service cloud.firestore {
     match /members/{memberId} {
       allow read, write: if true;
     }
+    // Allow read/write access to trainingTypes collection
+    match /trainingTypes/{typeId} {
+      allow read, write: if true;
+    }
   }
 }
 ```
@@ -65,6 +69,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /members/{memberId} {
+      allow read, write: if request.auth != null;
+    }
+    match /trainingTypes/{typeId} {
       allow read, write: if request.auth != null;
     }
   }
